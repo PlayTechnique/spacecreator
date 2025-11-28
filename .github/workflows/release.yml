@@ -97,4 +97,4 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh workflow run "Update Homebrew Cask" -f tag=${{ steps.version.outputs.VERSION }}
+          gh workflow run "Update Homebrew Cask" --repo ${{ github.repository }} -f tag=${{ steps.version.outputs.VERSION }}
