@@ -79,6 +79,11 @@ jobs:
 
             app "SpaceCreator.app"
 
+            preflight do
+              system_command "/usr/bin/xattr",
+                             args: ["-rd", "com.apple.quarantine", "#{staged_path}/SpaceCreator.app"]
+            end
+
             postflight do
               system_command "osascript", args: [
                 "-e", 'tell application "System Events" to make login item at end with properties {path:"/Applications/SpaceCreator.app", hidden:false}'
