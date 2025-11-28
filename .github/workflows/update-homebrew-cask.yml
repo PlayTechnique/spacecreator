@@ -1,0 +1,144 @@
+name: Update Homebrew Cask
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to use (e.g., v1.0.0)'
+        required: true
+
+jobs:
+  update-cask:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Get release info
+        id: release
+        run: |
+          if [ -n "${{ github.event.inputs.tag }}" ]; then
+            TAG="${{ github.event.inputs.tag }}"
+          else
+            TAG="${{ github.event.release.tag_name }}"
+          fi
+
+          # Strip 'v' prefix for version
+          VERSION="${TAG#v}"
+
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Using tag: $TAG, version: $VERSION"
+
+      - name: Download release asset and calculate SHA256
+        id: sha
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ steps.release.outputs.tag }}"
+
+          # Download the release zip
+          gh release download "$TAG" --pattern "SpaceCreator.zip" --output SpaceCreator.zip
+
+          # Calculate SHA256
+          SHA256=$(shasum -a 256 SpaceCreator.zip | awk '{print $1}')
+          echo "sha256=$SHA256" >> $GITHUB_OUTPUT
+          echo "SHA256: $SHA256"
+
+      - name: Get repository info
+        id: repo
+        run: |
+          echo "owner=${{ github.repository_owner }}" >> $GITHUB_OUTPUT
+          echo "repo=${{ github.event.repository.name }}" >> $GITHUB_OUTPUT
+
+      - name: Update cask formula
+        run: |
+          VERSION="${{ steps.release.outputs.version }}"
+          SHA256="${{ steps.sha.outputs.sha256 }}"
+          OWNER="${{ steps.repo.outputs.owner }}"
+          REPO="${{ steps.repo.outputs.repo }}"
+
+          mkdir -p Casks
+
+          cat > Casks/spacecreator.rb << EOF
+          cask "spacecreator" do
+            version "$VERSION"
+            sha256 "$SHA256"
+
+            url "https://github.com/$OWNER/$REPO/releases/download/v#{version}/SpaceCreator.zip"
+            name "SpaceCreator"
+            desc "Create desktop spaces with a keyboard shortcut"
+            homepage "https://github.com/$OWNER/$REPO"
+
+            depends_on macos: ">= :ventura"
+
+            app "SpaceCreator.app"
+
+            postflight do
+              system_command "osascript", args: [
+                "-e", 'tell application "System Events" to make login item at end with properties {path:"/Applications/SpaceCreator.app", hidden:false}'
+              ]
+            end
+
+            uninstall_postflight do
+              system_command "osascript", args: [
+                "-e", 'tell application "System Events" to delete login item "SpaceCreator"'
+              ]
+            end
+
+            caveats <<~EOS
+              SpaceCreator requires accessibility permissions to create spaces.
+
+              After installation, you may need to:
+              1. Open System Settings > Privacy & Security > Accessibility
+              2. Enable SpaceCreator in the list
+
+              The app has been added to your login items and will start automatically.
+            EOS
+          end
+          EOF
+
+          echo "Generated cask formula:"
+          cat Casks/spacecreator.rb
+
+      - name: Commit and push cask update
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git add Casks/spacecreator.rb
+
+          VERSION="${{ steps.release.outputs.version }}"
+
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "Update Homebrew cask to v$VERSION"
+            git push
+          fi
+
+      - name: Output installation instructions
+        run: |
+          OWNER="${{ steps.repo.outputs.owner }}"
+          REPO="${{ steps.repo.outputs.repo }}"
+          VERSION="${{ steps.release.outputs.version }}"
+
+          echo ""
+          echo "=========================================="
+          echo "Homebrew Cask Updated to v$VERSION"
+          echo "=========================================="
+          echo ""
+          echo "Users can install with:"
+          echo ""
+          echo "  brew tap $OWNER/$REPO https://github.com/$OWNER/$REPO"
+          echo "  brew install --cask spacecreator"
+          echo ""
+          echo "Or update with:"
+          echo ""
+          echo "  brew upgrade --cask spacecreator"
+          echo ""
