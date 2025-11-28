@@ -18,3 +18,14 @@ Use the justfile tasks for all release operations:
 - `just open` - Open the GitHub Actions page
 
 Do NOT manually create tags or run git commands for releases.
+
+## Debugging with Logs
+
+SpaceCreator uses os.Logger with subsystem `com.example.SpaceCreator` and category `SpaceCreation`.
+
+Stream logs in real-time:
+```bash
+just applogs
+```
+
+The app logs startup messages and detailed multi-monitor debugging info when creating spaces.

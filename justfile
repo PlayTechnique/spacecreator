@@ -45,3 +45,7 @@ release:
 # View logs from the most recent workflow run
 logs:
     gh run list --repo {{repo}} --limit 1 --json databaseId --jq '.[0].databaseId' | xargs -I {} gh run view {} --repo {{repo}} --log
+
+# Stream SpaceCreator app logs (like tail -f)
+applogs:
+    log stream --predicate 'subsystem == "com.example.SpaceCreator"' --info --style compact

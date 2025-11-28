@@ -25,9 +25,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private let defaultKeyCode: UInt32 = 0x02 // 'D' key
     
     func applicationDidFinishLaunching(_ notification: Notification) {
+        logger.info("SpaceCreator starting up - version \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown")")
         setupMenuBar()
         registerHotKey()
         requestAccessibilityPermissions()
+        logger.info("SpaceCreator startup complete")
     }
     
     func applicationWillTerminate(_ notification: Notification) {
