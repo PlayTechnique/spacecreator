@@ -1,6 +1,6 @@
 cask "spacecreator" do
-  version "2025-11-28-7"
-  sha256 "05ebab249c51c7d30c13ce812a4b2f89a066653781e2b3faf39cead4002a08e9"
+  version "2025-11-28-8"
+  sha256 "98b7de46e3101bc8f5e9fe8027a71342714ea59e7f6b9242f94599c8a933d3e4"
 
   url "https://github.com/PlayTechnique/spacecreator/releases/download/v#{version}/SpaceCreator.zip"
   name "SpaceCreator"
