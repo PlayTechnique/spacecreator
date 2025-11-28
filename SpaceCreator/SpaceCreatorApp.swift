@@ -163,158 +163,71 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
     
     private func createSpaceViaAppleScript() {
-        // Get the screen with the frontmost window (not mouse - mouse moves to menu bar when clicking menu)
-        var targetScreen: NSScreen? = nil
+        logger.info("=== SpaceCreator: Creating new space via AppleScript ===")
 
-        logger.info("=== SpaceCreator: Creating new space ===")
-        logger.info("Available screens: \(NSScreen.screens.count)")
-        for (index, screen) in NSScreen.screens.enumerated() {
-            let isMain = screen == NSScreen.main
-            logger.info("  Screen [\(index)] \(screen.localizedName): frame=\(String(describing: screen.frame)), isMain=\(isMain)")
-        }
+        // Use AppleScript to directly interact with Mission Control UI elements
+        // This approach doesn't require calculating screen coordinates
+        let script = """
+        do shell script "open -b 'com.apple.exposelauncher'"
+        delay 0.7
+        tell application "System Events"
+            tell process "Dock"
+                set mc to group 2 of group 1 of group 1
+                click button 1 of mc
+            end tell
+            delay 0.3
+            key code 53
+        end tell
+        """
 
-        // Try to get the screen of the frontmost app's main window
-        if let frontApp = NSWorkspace.shared.frontmostApplication {
-            logger.info("Frontmost app: \(frontApp.localizedName ?? "unknown") (bundle: \(frontApp.bundleIdentifier ?? "nil"))")
+        var error: NSDictionary?
+        if let scriptObject = NSAppleScript(source: script) {
+            _ = scriptObject.executeAndReturnError(&error)
 
-            if frontApp.bundleIdentifier != Bundle.main.bundleIdentifier {
-                // Use Accessibility API to get the frontmost window's position
-                let appElement = AXUIElementCreateApplication(frontApp.processIdentifier)
-                var windowValue: AnyObject?
-                let result = AXUIElementCopyAttributeValue(appElement, kAXFocusedWindowAttribute as CFString, &windowValue)
-
-                logger.info("AX focused window result: \(result.rawValue) (success=\(AXError.success.rawValue))")
-
-                if result == .success, let window = windowValue {
-                    var positionValue: AnyObject?
-                    let posResult = AXUIElementCopyAttributeValue(window as! AXUIElement, kAXPositionAttribute as CFString, &positionValue)
-
-                    logger.info("AX position result: \(posResult.rawValue)")
-
-                    if posResult == .success, let posValue = positionValue {
-                        var point = CGPoint.zero
-                        AXValueGetValue(posValue as! AXValue, .cgPoint, &point)
-                        logger.info("Window position (AX coords, top-left origin): x=\(point.x), y=\(point.y)")
-
-                        // Convert from top-left origin (Accessibility) to bottom-left origin (NSScreen)
-                        let primaryHeight = NSScreen.screens[0].frame.height
-                        let nsPoint = NSPoint(x: point.x, y: primaryHeight - point.y)
-                        logger.info("Converted position (NSScreen coords): x=\(nsPoint.x), y=\(nsPoint.y)")
-                        logger.info("Primary screen height used for conversion: \(primaryHeight)")
-
-                        for (index, screen) in NSScreen.screens.enumerated() {
-                            let contains = screen.frame.contains(nsPoint)
-                            logger.info("  Screen [\(index)] \(screen.localizedName) contains point: \(contains)")
-                            if contains {
-                                targetScreen = screen
-                                logger.info("  -> Selected screen [\(index)] \(screen.localizedName)")
-                                break
-                            }
-                        }
-
-                        if targetScreen == nil {
-                            logger.warning("No screen contains the converted point!")
-                        }
-                    } else {
-                        logger.error("Failed to get window position, AX error: \(posResult.rawValue)")
-                    }
-                } else {
-                    logger.error("Failed to get focused window, AX error: \(result.rawValue)")
-                }
+            if let error = error {
+                logger.error("AppleScript error: \(String(describing: error))")
+                // Fallback: try alternative UI element paths
+                tryAlternativeAppleScript()
             } else {
-                logger.info("Frontmost app is SpaceCreator itself, skipping AX lookup")
+                logger.info("AppleScript executed successfully")
+                showNotification(title: "Space Created", body: "New desktop space added")
             }
-        } else {
-            logger.warning("No frontmost application found")
         }
-
-        if targetScreen == nil {
-            logger.warning("No target screen determined, falling back to NSScreen.main")
-            targetScreen = NSScreen.main
-        }
-
-        guard let finalScreen = targetScreen else {
-            logger.error("No screen available at all!")
-            return
-        }
-
-        logger.info("Final target screen: \(finalScreen.localizedName) at \(String(describing: finalScreen.frame))")
-
-        // Calculate the position for the "+" button on the target screen
-        // The "+" button appears in the top-right area of the screen's space bar in Mission Control
-        // We need to convert to screen coordinates (macOS uses bottom-left origin)
-        let screenFrame = finalScreen.frame
-        let addButtonX = Int(screenFrame.maxX - 80)
-        // For multi-monitor, we need global coordinates
-        // macOS screen coordinates have origin at bottom-left of primary screen
-        let primaryScreenHeight = NSScreen.screens[0].frame.height
-        let addButtonY = Int(primaryScreenHeight - screenFrame.maxY + 35)
-
-        logger.info("Calculated add button position: x=\(addButtonX), y=\(addButtonY)")
-        logger.info("Screen frame: \(String(describing: screenFrame))")
-
-        // Simpler approach: use CGEvent to position mouse, then AppleScript to click
-        createSpaceWithMousePosition(on: finalScreen)
     }
 
-    private func createSpaceWithMousePosition(on screen: NSScreen) {
-        let screenFrame = screen.frame
-        logger.info("createSpaceWithMousePosition called for screen: \(screen.localizedName)")
-        logger.info("Screen frame: \(String(describing: screenFrame))")
+    private func tryAlternativeAppleScript() {
+        logger.info("Trying alternative AppleScript approach")
 
-        // Open Mission Control
-        let source = CGEventSource(stateID: .hidSystemState)
-        let ctrlUpDown = CGEvent(keyboardEventSource: source, virtualKey: 0x7E, keyDown: true)
-        ctrlUpDown?.flags = .maskControl
-        ctrlUpDown?.post(tap: .cghidEventTap)
+        // Try different UI element paths that may work on different macOS versions
+        let alternativeScript = """
+        do shell script "open -b 'com.apple.exposelauncher'"
+        delay 0.7
+        tell application "System Events"
+            tell process "Dock"
+                set allGroups to groups of group 1 of group 1
+                repeat with g in allGroups
+                    try
+                        if exists button 1 of g then
+                            click button 1 of g
+                            exit repeat
+                        end if
+                    end try
+                end repeat
+            end tell
+            delay 0.3
+            key code 53
+        end tell
+        """
 
-        let ctrlUpUp = CGEvent(keyboardEventSource: source, virtualKey: 0x7E, keyDown: false)
-        ctrlUpUp?.flags = .maskControl
-        ctrlUpUp?.post(tap: .cghidEventTap)
+        var error: NSDictionary?
+        if let scriptObject = NSAppleScript(source: alternativeScript) {
+            scriptObject.executeAndReturnError(&error)
 
-        logger.info("Sent Control+Up to open Mission Control")
-
-        // Wait for Mission Control to open, then move mouse to target screen's add button area
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [self] in
-            // Position in the top-right of the target screen where + button appears
-            // CGEvent uses top-left origin coordinate system
-            let primaryScreenHeight = NSScreen.screens[0].frame.height
-            let targetX = screenFrame.maxX - 60
-            let targetY = primaryScreenHeight - screenFrame.maxY + 25
-
-            logger.info("Mouse target position (CGEvent coords): x=\(targetX), y=\(targetY)")
-            logger.info("Primary screen height: \(primaryScreenHeight), screenFrame.maxY: \(screenFrame.maxY)")
-
-            // Move mouse to hover area to reveal + button
-            CGWarpMouseCursorPosition(CGPoint(x: targetX, y: targetY))
-            logger.info("Warped mouse cursor to hover position")
-
-            // Wait for + button to appear, then click
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [self] in
-                // Click the + button
-                let clickPoint = CGPoint(x: targetX, y: targetY)
-                logger.info("Clicking at: x=\(clickPoint.x), y=\(clickPoint.y)")
-
-                let mouseDown = CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown,
-                                       mouseCursorPosition: clickPoint, mouseButton: .left)
-                mouseDown?.post(tap: .cghidEventTap)
-
-                let mouseUp = CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp,
-                                     mouseCursorPosition: clickPoint, mouseButton: .left)
-                mouseUp?.post(tap: .cghidEventTap)
-
-                logger.info("Click events sent")
-
-                // Exit Mission Control
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [self] in
-                    let escDown = CGEvent(keyboardEventSource: nil, virtualKey: 0x35, keyDown: true)
-                    escDown?.post(tap: .cghidEventTap)
-                    let escUp = CGEvent(keyboardEventSource: nil, virtualKey: 0x35, keyDown: false)
-                    escUp?.post(tap: .cghidEventTap)
-
-                    logger.info("Sent Escape to exit Mission Control")
-                    showNotification(title: "Space Created", body: "New desktop space added")
-                }
+            if let error = error {
+                logger.error("Alternative AppleScript also failed: \(String(describing: error))")
+            } else {
+                logger.info("Alternative AppleScript executed successfully")
+                showNotification(title: "Space Created", body: "New desktop space added")
             }
         }
     }
