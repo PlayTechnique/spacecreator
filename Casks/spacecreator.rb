@@ -2,10 +2,10 @@ cask "spacecreator" do
   version "1.0.0"
   sha256 "PLACEHOLDER_SHA256_WILL_BE_UPDATED_BY_CI"
 
-  url "https://github.com/OWNER/SpaceCreator/releases/download/v#{version}/SpaceCreator.zip"
+  url "https://github.com/PlayTechnique/spacecreator/releases/download/v#{version}/SpaceCreator.zip"
   name "SpaceCreator"
   desc "Create desktop spaces with a keyboard shortcut"
-  homepage "https://github.com/OWNER/SpaceCreator"
+  homepage "https://github.com/PlayTechnique/spacecreator"
 
   depends_on macos: ">= :ventura"
 
