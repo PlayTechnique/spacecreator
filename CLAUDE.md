@@ -1,5 +1,13 @@
 # SpaceCreator
 
+## Local Build
+
+Use `DEVELOPER_DIR` env var for xcodebuild commands:
+
+```bash
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild -project SpaceCreator.xcodeproj -scheme SpaceCreator -configuration Debug build
+```
+
 ## Release Workflow
 
 Use the justfile tasks for all release operations:

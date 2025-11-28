@@ -1,6 +1,7 @@
 import SwiftUI
 import Carbon
 import ApplicationServices
+import os
 
 @main
 struct SpaceCreatorApp: App {
@@ -17,6 +18,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
     private var hotKeyRef: EventHotKeyRef?
     private var eventHandler: EventHandlerRef?
+    private let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "com.spacecreator", category: "SpaceCreation")
     
     // Meh + D = Control + Option + Shift + D
     private let defaultModifiers: UInt32 = UInt32(controlKey | optionKey | shiftKey)
@@ -160,79 +162,103 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     
     private func createSpaceViaAppleScript() {
         // Get the screen with the frontmost window (not mouse - mouse moves to menu bar when clicking menu)
-        var targetScreen = NSScreen.main ?? NSScreen.screens[0]
+        var targetScreen: NSScreen? = nil
+
+        logger.info("=== SpaceCreator: Creating new space ===")
+        logger.info("Available screens: \(NSScreen.screens.count)")
+        for (index, screen) in NSScreen.screens.enumerated() {
+            let isMain = screen == NSScreen.main
+            logger.info("  Screen [\(index)] \(screen.localizedName): frame=\(String(describing: screen.frame)), isMain=\(isMain)")
+        }
 
         // Try to get the screen of the frontmost app's main window
-        if let frontApp = NSWorkspace.shared.frontmostApplication,
-           frontApp.bundleIdentifier != Bundle.main.bundleIdentifier {
-            // Use Accessibility API to get the frontmost window's position
-            let appElement = AXUIElementCreateApplication(frontApp.processIdentifier)
-            var windowValue: AnyObject?
-            let result = AXUIElementCopyAttributeValue(appElement, kAXFocusedWindowAttribute as CFString, &windowValue)
+        if let frontApp = NSWorkspace.shared.frontmostApplication {
+            logger.info("Frontmost app: \(frontApp.localizedName ?? "unknown") (bundle: \(frontApp.bundleIdentifier ?? "nil"))")
 
-            if result == .success, let window = windowValue {
-                var positionValue: AnyObject?
-                let posResult = AXUIElementCopyAttributeValue(window as! AXUIElement, kAXPositionAttribute as CFString, &positionValue)
+            if frontApp.bundleIdentifier != Bundle.main.bundleIdentifier {
+                // Use Accessibility API to get the frontmost window's position
+                let appElement = AXUIElementCreateApplication(frontApp.processIdentifier)
+                var windowValue: AnyObject?
+                let result = AXUIElementCopyAttributeValue(appElement, kAXFocusedWindowAttribute as CFString, &windowValue)
 
-                if posResult == .success, let posValue = positionValue {
-                    var point = CGPoint.zero
-                    AXValueGetValue(posValue as! AXValue, .cgPoint, &point)
+                logger.info("AX focused window result: \(result.rawValue) (success=\(AXError.success.rawValue))")
 
-                    // Convert from top-left origin (Accessibility) to bottom-left origin (NSScreen)
-                    let primaryHeight = NSScreen.screens[0].frame.height
-                    let nsPoint = NSPoint(x: point.x, y: primaryHeight - point.y)
+                if result == .success, let window = windowValue {
+                    var positionValue: AnyObject?
+                    let posResult = AXUIElementCopyAttributeValue(window as! AXUIElement, kAXPositionAttribute as CFString, &positionValue)
 
-                    for screen in NSScreen.screens {
-                        if screen.frame.contains(nsPoint) {
-                            targetScreen = screen
-                            break
+                    logger.info("AX position result: \(posResult.rawValue)")
+
+                    if posResult == .success, let posValue = positionValue {
+                        var point = CGPoint.zero
+                        AXValueGetValue(posValue as! AXValue, .cgPoint, &point)
+                        logger.info("Window position (AX coords, top-left origin): x=\(point.x), y=\(point.y)")
+
+                        // Convert from top-left origin (Accessibility) to bottom-left origin (NSScreen)
+                        let primaryHeight = NSScreen.screens[0].frame.height
+                        let nsPoint = NSPoint(x: point.x, y: primaryHeight - point.y)
+                        logger.info("Converted position (NSScreen coords): x=\(nsPoint.x), y=\(nsPoint.y)")
+                        logger.info("Primary screen height used for conversion: \(primaryHeight)")
+
+                        for (index, screen) in NSScreen.screens.enumerated() {
+                            let contains = screen.frame.contains(nsPoint)
+                            logger.info("  Screen [\(index)] \(screen.localizedName) contains point: \(contains)")
+                            if contains {
+                                targetScreen = screen
+                                logger.info("  -> Selected screen [\(index)] \(screen.localizedName)")
+                                break
+                            }
                         }
+
+                        if targetScreen == nil {
+                            logger.warning("No screen contains the converted point!")
+                        }
+                    } else {
+                        logger.error("Failed to get window position, AX error: \(posResult.rawValue)")
                     }
+                } else {
+                    logger.error("Failed to get focused window, AX error: \(result.rawValue)")
                 }
+            } else {
+                logger.info("Frontmost app is SpaceCreator itself, skipping AX lookup")
             }
+        } else {
+            logger.warning("No frontmost application found")
         }
+
+        if targetScreen == nil {
+            logger.warning("No target screen determined, falling back to NSScreen.main")
+            targetScreen = NSScreen.main
+        }
+
+        guard let finalScreen = targetScreen else {
+            logger.error("No screen available at all!")
+            return
+        }
+
+        logger.info("Final target screen: \(finalScreen.localizedName) at \(String(describing: finalScreen.frame))")
 
         // Calculate the position for the "+" button on the target screen
         // The "+" button appears in the top-right area of the screen's space bar in Mission Control
         // We need to convert to screen coordinates (macOS uses bottom-left origin)
-        let screenFrame = targetScreen.frame
+        let screenFrame = finalScreen.frame
         let addButtonX = Int(screenFrame.maxX - 80)
         // For multi-monitor, we need global coordinates
         // macOS screen coordinates have origin at bottom-left of primary screen
         let primaryScreenHeight = NSScreen.screens[0].frame.height
         let addButtonY = Int(primaryScreenHeight - screenFrame.maxY + 35)
 
-        let script = """
-        do shell script "open -b 'com.apple.exposelauncher'"
-        delay 0.7
-        tell application "System Events"
-            -- Move mouse to the top-right of the target screen to reveal the + button
-            do shell script "cliclick m:\(addButtonX),\(addButtonY)"
-        end tell
-        delay 0.4
-        tell application "System Events"
-            tell process "Dock"
-                set allGroups to groups of group 1 of group 1
-                repeat with g in allGroups
-                    try
-                        if exists button 1 of g then
-                            click button 1 of g
-                            exit repeat
-                        end if
-                    end try
-                end repeat
-            end tell
-            delay 0.3
-            key code 53
-        end tell
-        """
+        logger.info("Calculated add button position: x=\(addButtonX), y=\(addButtonY)")
+        logger.info("Screen frame: \(String(describing: screenFrame))")
 
         // Simpler approach: use CGEvent to position mouse, then AppleScript to click
-        createSpaceWithMousePosition(on: targetScreen)
+        createSpaceWithMousePosition(on: finalScreen)
     }
 
     private func createSpaceWithMousePosition(on screen: NSScreen) {
         let screenFrame = screen.frame
+        logger.info("createSpaceWithMousePosition called for screen: \(screen.localizedName)")
+        logger.info("Screen frame: \(String(describing: screenFrame))")
 
         // Open Mission Control
         let source = CGEventSource(stateID: .hidSystemState)
@@ -244,24 +270,28 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         ctrlUpUp?.flags = .maskControl
         ctrlUpUp?.post(tap: .cghidEventTap)
 
+        logger.info("Sent Control+Up to open Mission Control")
+
         // Wait for Mission Control to open, then move mouse to target screen's add button area
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [self] in
             // Position in the top-right of the target screen where + button appears
             // CGEvent uses top-left origin coordinate system
             let primaryScreenHeight = NSScreen.screens[0].frame.height
             let targetX = screenFrame.maxX - 60
             let targetY = primaryScreenHeight - screenFrame.maxY + 25
 
+            logger.info("Mouse target position (CGEvent coords): x=\(targetX), y=\(targetY)")
+            logger.info("Primary screen height: \(primaryScreenHeight), screenFrame.maxY: \(screenFrame.maxY)")
+
             // Move mouse to hover area to reveal + button
-            let moveEvent = CGEvent(mouseEventSource: nil, mouseType: .mouseMoved,
-                                   mouseCursorPosition: CGPoint(x: targetX, y: targetY),
-                                   mouseButton: .left)
-            moveEvent?.post(tap: .cghidEventTap)
+            CGWarpMouseCursorPosition(CGPoint(x: targetX, y: targetY))
+            logger.info("Warped mouse cursor to hover position")
 
             // Wait for + button to appear, then click
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [self] in
                 // Click the + button
                 let clickPoint = CGPoint(x: targetX, y: targetY)
+                logger.info("Clicking at: x=\(clickPoint.x), y=\(clickPoint.y)")
 
                 let mouseDown = CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown,
                                        mouseCursorPosition: clickPoint, mouseButton: .left)
@@ -271,14 +301,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                                      mouseCursorPosition: clickPoint, mouseButton: .left)
                 mouseUp?.post(tap: .cghidEventTap)
 
+                logger.info("Click events sent")
+
                 // Exit Mission Control
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [self] in
                     let escDown = CGEvent(keyboardEventSource: nil, virtualKey: 0x35, keyDown: true)
                     escDown?.post(tap: .cghidEventTap)
                     let escUp = CGEvent(keyboardEventSource: nil, virtualKey: 0x35, keyDown: false)
                     escUp?.post(tap: .cghidEventTap)
 
-                    self.showNotification(title: "Space Created", body: "New desktop space added")
+                    logger.info("Sent Escape to exit Mission Control")
+                    showNotification(title: "Space Created", body: "New desktop space added")
                 }
             }
         }
