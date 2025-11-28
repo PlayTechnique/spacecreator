@@ -159,14 +159,36 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
     
     private func createSpaceViaAppleScript() {
-        // Get the screen where the mouse cursor currently is
-        let mouseLocation = NSEvent.mouseLocation
+        // Get the screen with the frontmost window (not mouse - mouse moves to menu bar when clicking menu)
         var targetScreen = NSScreen.main ?? NSScreen.screens[0]
 
-        for screen in NSScreen.screens {
-            if screen.frame.contains(mouseLocation) {
-                targetScreen = screen
-                break
+        // Try to get the screen of the frontmost app's main window
+        if let frontApp = NSWorkspace.shared.frontmostApplication,
+           frontApp.bundleIdentifier != Bundle.main.bundleIdentifier {
+            // Use Accessibility API to get the frontmost window's position
+            let appElement = AXUIElementCreateApplication(frontApp.processIdentifier)
+            var windowValue: AnyObject?
+            let result = AXUIElementCopyAttributeValue(appElement, kAXFocusedWindowAttribute as CFString, &windowValue)
+
+            if result == .success, let window = windowValue {
+                var positionValue: AnyObject?
+                let posResult = AXUIElementCopyAttributeValue(window as! AXUIElement, kAXPositionAttribute as CFString, &positionValue)
+
+                if posResult == .success, let posValue = positionValue {
+                    var point = CGPoint.zero
+                    AXValueGetValue(posValue as! AXValue, .cgPoint, &point)
+
+                    // Convert from top-left origin (Accessibility) to bottom-left origin (NSScreen)
+                    let primaryHeight = NSScreen.screens[0].frame.height
+                    let nsPoint = NSPoint(x: point.x, y: primaryHeight - point.y)
+
+                    for screen in NSScreen.screens {
+                        if screen.frame.contains(nsPoint) {
+                            targetScreen = screen
+                            break
+                        }
+                    }
+                }
             }
         }
 
