@@ -41,3 +41,7 @@ release:
 
     echo ""
     echo "Tag $NEW_TAG pushed! Release workflow will start automatically."
+
+# View logs from the most recent workflow run
+logs:
+    gh run list --repo {{repo}} --limit 1 --json databaseId --jq '.[0].databaseId' | xargs -I {} gh run view {} --repo {{repo}} --log
