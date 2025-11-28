@@ -41,6 +41,3 @@ release:
 
     echo ""
     echo "Tag $NEW_TAG pushed! Release workflow will start automatically."
-    echo "Opening actions page..."
-    sleep 2
-    open "https://github.com/{{repo}}/actions"
