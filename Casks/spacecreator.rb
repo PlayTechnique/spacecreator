@@ -1,6 +1,6 @@
 cask "spacecreator" do
-  version "2025-11-28-8"
-  sha256 "98b7de46e3101bc8f5e9fe8027a71342714ea59e7f6b9242f94599c8a933d3e4"
+  version "2025-11-28-9"
+  sha256 "6dab0270e5c71302d1fe813664c4be032f67c4b0fc295e22f58ab3b5bb88b09e"
 
   url "https://github.com/PlayTechnique/spacecreator/releases/download/v#{version}/SpaceCreator.zip"
   name "SpaceCreator"
@@ -10,6 +10,11 @@ cask "spacecreator" do
   depends_on macos: ">= :ventura"
 
   app "SpaceCreator.app"
+
+  preflight do
+    system_command "/usr/bin/xattr",
+                   args: ["-rd", "com.apple.quarantine", "#{staged_path}/SpaceCreator.app"]
+  end
 
   postflight do
     system_command "osascript", args: [
