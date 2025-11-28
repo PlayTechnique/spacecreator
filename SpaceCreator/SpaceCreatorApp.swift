@@ -159,84 +159,103 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
     
     private func createSpaceViaAppleScript() {
+        // Get the screen where the mouse cursor currently is
+        let mouseLocation = NSEvent.mouseLocation
+        var targetScreen = NSScreen.main ?? NSScreen.screens[0]
+
+        for screen in NSScreen.screens {
+            if screen.frame.contains(mouseLocation) {
+                targetScreen = screen
+                break
+            }
+        }
+
+        // Calculate the position for the "+" button on the target screen
+        // The "+" button appears in the top-right area of the screen's space bar in Mission Control
+        // We need to convert to screen coordinates (macOS uses bottom-left origin)
+        let screenFrame = targetScreen.frame
+        let addButtonX = Int(screenFrame.maxX - 80)
+        // For multi-monitor, we need global coordinates
+        // macOS screen coordinates have origin at bottom-left of primary screen
+        let primaryScreenHeight = NSScreen.screens[0].frame.height
+        let addButtonY = Int(primaryScreenHeight - screenFrame.maxY + 35)
+
         let script = """
-        tell application "System Events"
-            -- Open Mission Control
-            key code 126 using control down
-            delay 0.5
-            
-            -- Click the add button in Mission Control
-            tell process "Dock"
-                set missionControlGroup to group 2 of group 1 of group 1
-                click button 1 of missionControlGroup
-            end tell
-            
-            delay 0.3
-            
-            -- Exit Mission Control
-            key code 53
-        end tell
-        """
-        
-        // Try the simpler AppleScript method first
-        let simpleScript = """
         do shell script "open -b 'com.apple.exposelauncher'"
         delay 0.7
         tell application "System Events"
+            -- Move mouse to the top-right of the target screen to reveal the + button
+            do shell script "cliclick m:\(addButtonX),\(addButtonY)"
+        end tell
+        delay 0.4
+        tell application "System Events"
             tell process "Dock"
-                set mc to group 2 of group 1 of group 1
-                click button 1 of mc
+                set allGroups to groups of group 1 of group 1
+                repeat with g in allGroups
+                    try
+                        if exists button 1 of g then
+                            click button 1 of g
+                            exit repeat
+                        end if
+                    end try
+                end repeat
             end tell
             delay 0.3
             key code 53
         end tell
         """
-        
-        var error: NSDictionary?
-        if let scriptObject = NSAppleScript(source: simpleScript) {
-            scriptObject.executeAndReturnError(&error)
-            
-            if let error = error {
-                print("AppleScript error: \(error)")
-                // Fallback to keyboard simulation
-                createSpaceViaKeyboardSimulation()
-            } else {
-                showNotification(title: "Space Created", body: "New desktop space added")
-            }
-        }
+
+        // Simpler approach: use CGEvent to position mouse, then AppleScript to click
+        createSpaceWithMousePosition(on: targetScreen)
     }
-    
-    private func createSpaceViaKeyboardSimulation() {
-        // Open Mission Control (Control + Up Arrow)
-        let missionControlDown = CGEvent(keyboardEventSource: nil, virtualKey: 0x7E, keyDown: true)
-        missionControlDown?.flags = .maskControl
-        missionControlDown?.post(tap: .cghidEventTap)
-        
-        let missionControlUp = CGEvent(keyboardEventSource: nil, virtualKey: 0x7E, keyDown: false)
-        missionControlUp?.flags = .maskControl
-        missionControlUp?.post(tap: .cghidEventTap)
-        
-        // Wait for Mission Control to open, then try to add a space
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) {
-            // Move mouse to top-right area where the + button appears
-            let screenFrame = NSScreen.main?.frame ?? NSRect.zero
-            let addButtonPosition = CGPoint(x: screenFrame.width - 50, y: screenFrame.height - 30)
-            
-            // Move mouse
-            CGEvent(mouseEventSource: nil, mouseType: .mouseMoved, mouseCursorPosition: addButtonPosition, mouseButton: .left)?.post(tap: .cghidEventTap)
-            
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                // Click
-                CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown, mouseCursorPosition: addButtonPosition, mouseButton: .left)?.post(tap: .cghidEventTap)
-                CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp, mouseCursorPosition: addButtonPosition, mouseButton: .left)?.post(tap: .cghidEventTap)
-                
+
+    private func createSpaceWithMousePosition(on screen: NSScreen) {
+        let screenFrame = screen.frame
+
+        // Open Mission Control
+        let source = CGEventSource(stateID: .hidSystemState)
+        let ctrlUpDown = CGEvent(keyboardEventSource: source, virtualKey: 0x7E, keyDown: true)
+        ctrlUpDown?.flags = .maskControl
+        ctrlUpDown?.post(tap: .cghidEventTap)
+
+        let ctrlUpUp = CGEvent(keyboardEventSource: source, virtualKey: 0x7E, keyDown: false)
+        ctrlUpUp?.flags = .maskControl
+        ctrlUpUp?.post(tap: .cghidEventTap)
+
+        // Wait for Mission Control to open, then move mouse to target screen's add button area
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+            // Position in the top-right of the target screen where + button appears
+            // CGEvent uses top-left origin coordinate system
+            let primaryScreenHeight = NSScreen.screens[0].frame.height
+            let targetX = screenFrame.maxX - 60
+            let targetY = primaryScreenHeight - screenFrame.maxY + 25
+
+            // Move mouse to hover area to reveal + button
+            let moveEvent = CGEvent(mouseEventSource: nil, mouseType: .mouseMoved,
+                                   mouseCursorPosition: CGPoint(x: targetX, y: targetY),
+                                   mouseButton: .left)
+            moveEvent?.post(tap: .cghidEventTap)
+
+            // Wait for + button to appear, then click
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                // Click the + button
+                let clickPoint = CGPoint(x: targetX, y: targetY)
+
+                let mouseDown = CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown,
+                                       mouseCursorPosition: clickPoint, mouseButton: .left)
+                mouseDown?.post(tap: .cghidEventTap)
+
+                let mouseUp = CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp,
+                                     mouseCursorPosition: clickPoint, mouseButton: .left)
+                mouseUp?.post(tap: .cghidEventTap)
+
+                // Exit Mission Control
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                    // Press Escape to exit Mission Control
                     let escDown = CGEvent(keyboardEventSource: nil, virtualKey: 0x35, keyDown: true)
                     escDown?.post(tap: .cghidEventTap)
                     let escUp = CGEvent(keyboardEventSource: nil, virtualKey: 0x35, keyDown: false)
                     escUp?.post(tap: .cghidEventTap)
-                    
+
                     self.showNotification(title: "Space Created", body: "New desktop space added")
                 }
             }
