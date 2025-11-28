@@ -1,0 +1,94 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version tag (e.g., v1.0.0)'
+        required: false
+        default: ''
+
+jobs:
+  build:
+    runs-on: macos-14
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Select Xcode version
+        run: sudo xcode-select -s /Applications/Xcode_15.4.app/Contents/Developer
+
+      - name: Show Xcode version
+        run: xcodebuild -version
+
+      - name: Build application
+        run: |
+          xcodebuild -project SpaceCreator.xcodeproj \
+            -scheme SpaceCreator \
+            -configuration Release \
+            -derivedDataPath build \
+            -arch arm64 -arch x86_64 \
+            CODE_SIGN_IDENTITY="-" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+      - name: Create app bundle
+        run: |
+          APP_PATH="build/Build/Products/Release/SpaceCreator.app"
+
+          # Verify the app was built
+          if [ ! -d "$APP_PATH" ]; then
+            echo "Error: App not found at $APP_PATH"
+            find build -name "*.app" -type d
+            exit 1
+          fi
+
+          # Create release directory
+          mkdir -p release
+
+          # Copy app to release directory
+          cp -R "$APP_PATH" release/
+
+          # Create zip for distribution
+          cd release
+          zip -r SpaceCreator.zip SpaceCreator.app
+          cd ..
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SpaceCreator
+          path: release/SpaceCreator.zip
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: SpaceCreator
+
+      - name: Get version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: SpaceCreator ${{ steps.version.outputs.VERSION }}
+          draft: false
+          prerelease: false
+          files: SpaceCreator.zip
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
